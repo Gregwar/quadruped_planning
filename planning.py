@@ -2,15 +2,24 @@ from qpsolvers import solve_qp
 import matplotlib.pyplot as plt
 import numpy as np
 
-steps_duration = 1
-slice_per_step = 1
-com_max_speed = 0.5
-legs_spacing = 0.1
-max_step_size = 0.075
+# Parameters
+legs_spacing = 0.1 # Legs spacing around the center of robot
+max_step_size = 0.075 # Maximum size of one step (for footfall generation)
+com_max_speed = 0.5 # CoM max variation per step
+margin = 0.03 # Margin (distance) inside the support polygon
+
+# Target to reach
 target = np.array([0.5, 0])
+
+# Position of the legs at begining of motion
 legs = np.array([[-1,1], [1,1], [-1,-1], [1,-1]]) * legs_spacing
+
+# Position of the legs at end of motion
 legs_target = legs + target
 
+# Here, consecutive steps are created until we reach the target and stored in steps
+# We basically move the legs by increment (of maximum max_step_size) until we reach the
+# target
 steps = []
 flying = []
 step = legs.copy()
@@ -28,6 +37,7 @@ while np.linalg.norm(step - legs_target) > 1e-5:
 steps.append(steps[-1])
 flying.append(None)
 
+# This returns the points of the support polygon at step k
 def support_polygon(k):
     points = []
     for i in 0, 1, 3, 2:
@@ -38,25 +48,31 @@ def support_polygon(k):
 
     return np.array(points)
 
+# We don't have a notion of time in this example, each step is one foot swap
+n_steps = len(steps)
 
-n_steps = slice_per_step * len(steps)
+# Initializing matrices for QP
+# P is just an identity, and q zero
 P = np.eye(n_steps * 2)
 q = np.zeros(n_steps * 2)
 
+# Lower and upper bounds are directly set by com_max_speed 
 ub = np.ones(n_steps * 2) * com_max_speed
 lb = -ub
 
+# We create the constraint Ax=b that makes us reaching the target at the end of motion
 A = np.stack((
     np.array([1, 0] * (n_steps), dtype=float),
     np.array([0, 1] * (n_steps), dtype=float)
 ))
 b = target
 
+# Creating inequality constraints Gx <= h
 G = []
 h = []
 for k in range(1, len(steps)-1):
     R = np.array([[0, 1], [-1, 0]])
-    margin = 0.03
+    # We get the support
     polygon = support_polygon(k)
     for n in range(len(polygon)-1):
         point1 = polygon[n].reshape(2, -1)
@@ -69,16 +85,11 @@ for k in range(1, len(steps)-1):
 G = np.array(G)
 h = np.array(h)
 
-print(P.shape)
-print(q.shape)
-print(A.shape)
-print(b.shape)
-print(G.shape)
-print(h.shape)
-# exit()
-
+# Giving this to QP solver!
+# https://pypi.org/project/qpsolvers/
 sol = solve_qp(P, q, G, h, A, b).reshape(-1, 2)
 
+# We integrate deltas to build an array of a sequence of centers of mass
 com = np.array([0., 0.])
 coms = []
 coms.append(com.copy())
@@ -87,8 +98,8 @@ for entry in sol:
     coms.append(com.copy())
 coms.append(coms[-1])
 coms = np.array(coms)
-print(coms.T)
 
+# Plotting the result with matplotlib
 for k in range(len(steps)):
     plt.clf()
     steps_positions = np.array(steps).reshape(-1, 2)
@@ -107,8 +118,5 @@ for k in range(len(steps)):
     plt.scatter([poly.T[0][1]], [poly.T[1][1]], color='red', marker='x')
 
     plt.scatter(legs_target.T[0], legs_target.T[1], color='orange')
-    # plt.show()
-    plt.pause(0.2)
-    plt.savefig('walk-%02d.png' % k)
-    # input()
+    plt.pause(1.)
 
